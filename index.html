@@ -1,0 +1,1477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="apple-mobile-web-app-title" content="TaskVault"/>
+  <meta name="theme-color" content="#0a0805"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <title>TaskVault</title>
+  <link rel="apple-touch-icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIj48cmVjdCB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiIgcng9IjExMiIgZmlsbD0iIzBhMDgwNSIvPjx0ZXh0IHg9IjI1NiIgeT0iMzMwIiBmb250LXNpemU9IjI4MCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2Q0YTAxNyI+4pWmPC90ZXh0Pjwvc3ZnPg=="/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;900&family=DM+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet"/>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    :root {
+      --gold:       #d4a017;
+      --gold-light: #f5c842;
+      --gold-dim:   rgba(212,160,23,0.15);
+      --gold-border:rgba(212,160,23,0.22);
+      --surface:    rgba(255,255,255,0.042);
+      --surface-2:  rgba(255,255,255,0.07);
+      --border:     rgba(255,255,255,0.09);
+      --text:       #f0e8d0;
+      --text-dim:   rgba(240,232,208,0.45);
+      --text-muted: rgba(255,255,255,0.25);
+      --red:        #f87171;
+      --green:      #6ee7b7;
+      --blue:       #93c5fd;
+      --purple:     #c4b5fd;
+      --bg:         #0a0805;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    html, body { height: 100%; }
+    body {
+      background: var(--bg);
+      overflow: hidden;
+      -webkit-text-size-adjust: 100%;
+      font-family: 'DM Sans', 'Segoe UI', sans-serif;
+    }
+    #root { height: 100%; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+    input, textarea, button, select { -webkit-appearance: none; font-family: inherit; border-radius: 0; }
+    input[type="date"] { -webkit-appearance: none; }
+    ::-webkit-scrollbar { width: 0; height: 0; }
+    input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1) opacity(0.35); cursor: pointer; }
+    @keyframes fadeIn    { from{opacity:0}           to{opacity:1} }
+    @keyframes popIn     { from{transform:scale(0.88);opacity:0} to{transform:scale(1);opacity:1} }
+    @keyframes slideUp   { from{transform:translateY(40px);opacity:0} to{transform:translateY(0);opacity:1} }
+    @keyframes slideDown { from{transform:translateY(-10px);opacity:0} to{transform:translateY(0);opacity:1} }
+    @keyframes shimmer   { 0%,100%{opacity:1} 50%{opacity:0.3} }
+    @keyframes spin      { to{transform:rotate(360deg)} }
+    @keyframes glow      { 0%,100%{box-shadow:0 0 12px rgba(212,160,23,0.3)} 50%{box-shadow:0 0 28px rgba(212,160,23,0.6)} }
+    .card-hover { transition: transform 0.2s ease, box-shadow 0.2s ease; }
+    .card-hover:hover { transform: translateY(-1px); }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+// ─── Storage ──────────────────────────────────────────────────────────────────
+const storage = {
+  get: async (k) => {
+    const v = localStorage.getItem(k);
+    if (v === null) throw new Error("Not found");
+    return { key: k, value: v };
+  },
+  set: async (k, v) => { localStorage.setItem(k, v); return { key: k, value: v }; },
+};
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+const LOCAL_KEY    = "taskvault-v3";
+const BANNER_KEY   = "taskvault-banner-v2";
+
+const PRI = {
+  low:    { color:"#6ee7b7", bg:"rgba(110,231,183,0.12)", dot:"#6ee7b7", label:"Low"    },
+  medium: { color:"#fbbf24", bg:"rgba(251,191,36,0.12)",  dot:"#fbbf24", label:"Medium" },
+  high:   { color:"#f87171", bg:"rgba(248,113,113,0.12)", dot:"#f87171", label:"High"   },
+};
+
+const FILTERS = [
+  { key:"all",      label:"All"        },
+  { key:"active",   label:"Active"     },
+  { key:"projects", label:"Projects"   },
+  { key:"tasks",    label:"Tasks"      },
+  { key:"overdue",  label:"⚠ Overdue" },
+  { key:"done",     label:"Completed"  },
+];
+
+const SORTS = [
+  { key:"newest",   label:"Newest First" },
+  { key:"oldest",   label:"Oldest First" },
+  { key:"priority", label:"Priority"     },
+  { key:"dueDate",  label:"Due Date"     },
+  { key:"alpha",    label:"A → Z"        },
+  { key:"progress", label:"Progress"     },
+];
+
+const EMPTY_FORM = {
+  title:"", description:"", type:"task",
+  gift:"", priority:"medium", dueDate:"",
+  tagInput:"", tags:[],
+};
+
+function genId() { return `${Date.now()}-${Math.random().toString(36).slice(2,8)}`; }
+
+function fmtDue(dueDate) {
+  if (!dueDate) return null;
+  const d = new Date(dueDate + "T00:00:00");
+  const today = new Date(); today.setHours(0,0,0,0);
+  const diff = Math.round((d - today) / 86400000);
+  if (diff < 0)   return { label:`${Math.abs(diff)}d overdue`, color:"#f87171", urgent:true };
+  if (diff === 0) return { label:"Due today",                  color:"#fbbf24", urgent:true };
+  if (diff === 1) return { label:"Due tomorrow",               color:"#fbbf24", urgent:false };
+  if (diff <= 7)  return { label:`${diff}d left`,              color:"rgba(212,160,23,0.8)", urgent:false };
+  return { label:`${diff}d left`, color:"rgba(255,255,255,0.28)", urgent:false };
+}
+
+// ─── Input Component ──────────────────────────────────────────────────────────
+function Input({ value, onChange, placeholder, style, ...props }) {
+  const base = {
+    width:"100%", background:"rgba(0,0,0,0.35)",
+    border:"1px solid var(--border)", borderRadius:12,
+    padding:"10px 14px", color:"var(--text)", fontSize:13.5,
+    fontFamily:"inherit", transition:"border-color 0.2s",
+    ...style,
+  };
+  return (
+    <input value={value} onChange={onChange} placeholder={placeholder}
+      onFocus={e=>{e.target.style.borderColor="rgba(212,160,23,0.4)";}}
+      onBlur={e=>{e.target.style.borderColor="var(--border)";}}
+      style={base} {...props}/>
+  );
+}
+
+// ─── Gift Modal ───────────────────────────────────────────────────────────────
+function GiftModal({ item, onClose }) {
+  return (
+    <div onClick={onClose} style={{
+      position:"fixed", inset:0, background:"rgba(0,0,0,0.88)",
+      display:"flex", alignItems:"center", justifyContent:"center",
+      zIndex:300, backdropFilter:"blur(12px)", animation:"fadeIn 0.2s ease",
+    }}>
+      <div onClick={e=>e.stopPropagation()} style={{
+        background:"linear-gradient(135deg,#130f07 0%,#231a08 50%,#1a130a 100%)",
+        border:"1px solid rgba(212,160,23,0.5)",
+        borderRadius:28, padding:"48px 40px",
+        maxWidth:380, width:"90%", textAlign:"center",
+        boxShadow:"0 0 80px rgba(212,160,23,0.25), inset 0 1px 0 rgba(212,160,23,0.15)",
+        animation:"popIn 0.35s cubic-bezier(0.34,1.56,0.64,1)",
+      }}>
+        <div style={{fontSize:72, marginBottom:16, animation:"glow 2s infinite"}}>🎁</div>
+        <div style={{
+          fontFamily:"'Playfair Display',serif", fontSize:26, color:"var(--gold-light)",
+          marginBottom:8, fontWeight:700, letterSpacing:"-0.01em",
+        }}>Reward Unlocked!</div>
+        <div style={{color:"rgba(240,232,208,0.5)", fontSize:13, marginBottom:6, lineHeight:1.6}}>
+          You earned this by completing
+        </div>
+        <div style={{color:"var(--text)", fontWeight:600, fontSize:15, marginBottom:24, lineHeight:1.5}}>
+          "{item.title}"
+        </div>
+        <div style={{
+          background:"linear-gradient(135deg,rgba(212,160,23,0.12),rgba(245,200,66,0.08))",
+          border:"1px solid rgba(212,160,23,0.45)",
+          borderRadius:16, padding:"18px 24px",
+          color:"var(--gold-light)", fontSize:20,
+          fontWeight:700, fontFamily:"'Playfair Display',serif",
+          letterSpacing:"-0.01em", marginBottom:24,
+        }}>{item.gift}</div>
+        <button onClick={onClose} style={{
+          background:"linear-gradient(135deg,#c49012,#f5c842)",
+          color:"#1a0f00", border:"none",
+          borderRadius:12, padding:"12px 32px",
+          fontWeight:700, fontSize:14, cursor:"pointer",
+          fontFamily:"inherit", letterSpacing:"0.02em",
+          boxShadow:"0 4px 20px rgba(212,160,23,0.4)",
+        }}>Claim Reward ✨</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Settings Modal ───────────────────────────────────────────────────────────
+function SettingsModal({ onClose }) {
+  const handleDownload = () => {
+    const html = document.documentElement.outerHTML;
+    const blob = new Blob([html], { type:"text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "TaskVault.html"; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExport = () => {
+    const items = JSON.parse(localStorage.getItem(LOCAL_KEY) || "[]");
+    const blob = new Blob([JSON.stringify({ items, exportedAt:new Date().toISOString() }, null, 2)], { type:"application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `taskvault-backup-${new Date().toLocaleDateString("en-GB").replace(/\//g,"-")}.json`; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImport = () => {
+    const inp = document.createElement("input");
+    inp.type = "file"; inp.accept = ".json";
+    inp.onchange = e => {
+      const f = e.target.files[0]; if (!f) return;
+      const reader = new FileReader();
+      reader.onload = ev => {
+        try {
+          const d = JSON.parse(ev.target.result);
+          const items = d.items || d;
+          if (Array.isArray(items)) { localStorage.setItem(LOCAL_KEY, JSON.stringify(items)); window.location.reload(); }
+          else alert("Invalid backup file.");
+        } catch { alert("Could not read file."); }
+      };
+      reader.readAsText(f);
+    };
+    inp.click();
+  };
+
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const isAndroid = /android/i.test(navigator.userAgent);
+  const isMobile = isIOS || isAndroid;
+
+  const SectionLabel = ({ children }) => (
+    <div style={{
+      fontSize:10, letterSpacing:"0.14em", textTransform:"uppercase",
+      color:"var(--gold)", fontWeight:700, marginBottom:10, marginTop:20,
+    }}>{children}</div>
+  );
+
+  const ActionBtn = ({ onClick, icon, label, sub, variant="ghost" }) => (
+    <button onClick={onClick} style={{
+      width:"100%", padding:"13px 16px", borderRadius:13,
+      border: variant==="primary" ? "none" : "1px solid var(--gold-border)",
+      background: variant==="primary"
+        ? "linear-gradient(135deg,#c49012,#f5c842)"
+        : "rgba(212,160,23,0.05)",
+      color: variant==="primary" ? "#1a0f00" : "var(--text)",
+      display:"flex", alignItems:"center", gap:12,
+      cursor:"pointer", marginBottom:8, fontFamily:"inherit",
+      textAlign:"left", transition:"all 0.15s",
+    }}
+    onMouseEnter={e=>{if(variant!=="primary")e.currentTarget.style.background="rgba(212,160,23,0.1)";}}
+    onMouseLeave={e=>{if(variant!=="primary")e.currentTarget.style.background="rgba(212,160,23,0.05)";}}>
+      <span style={{fontSize:18, flexShrink:0}}>{icon}</span>
+      <div>
+        <div style={{fontWeight:600, fontSize:13.5}}>{label}</div>
+        {sub && <div style={{fontSize:11, color: variant==="primary" ? "rgba(26,15,0,0.6)" : "var(--text-dim)", marginTop:1}}>{sub}</div>}
+      </div>
+    </button>
+  );
+
+  return (
+    <div onClick={onClose} style={{
+      position:"fixed", inset:0, background:"rgba(0,0,0,0.75)",
+      display:"flex", alignItems:"flex-end", justifyContent:"center",
+      zIndex:200, backdropFilter:"blur(8px)", animation:"fadeIn 0.2s ease",
+    }}>
+      <div onClick={e=>e.stopPropagation()} style={{
+        background:"linear-gradient(180deg,#111009 0%,#0e0c08 100%)",
+        border:"1px solid var(--gold-border)", borderTopLeftRadius:28, borderTopRightRadius:28,
+        padding:"28px 22px", paddingBottom:"max(44px, env(safe-area-inset-bottom, 44px))",
+        width:"100%", maxWidth:500,
+        animation:"slideUp 0.3s cubic-bezier(0.22,1,0.36,1)",
+        maxHeight:"92vh", overflowY:"auto",
+      }}>
+        {/* Handle bar */}
+        <div style={{
+          width:40, height:4, borderRadius:4,
+          background:"rgba(255,255,255,0.12)", margin:"0 auto 24px",
+        }}/>
+
+        <div style={{display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:4}}>
+          <div>
+            <div style={{fontSize:10, letterSpacing:"0.16em", color:"var(--gold)", fontWeight:700, textTransform:"uppercase"}}>Workspace</div>
+            <div style={{fontSize:22, fontWeight:700, color:"var(--text)", fontFamily:"'Playfair Display',serif", marginTop:2}}>Settings & Tools</div>
+          </div>
+          <button onClick={onClose} style={{
+            width:34, height:34, borderRadius:"50%",
+            border:"1px solid var(--border)", background:"var(--surface)",
+            cursor:"pointer", color:"var(--text-dim)", fontSize:14,
+            display:"flex", alignItems:"center", justifyContent:"center",
+          }}>✕</button>
+        </div>
+
+        <SectionLabel>📲 Install on Your Device</SectionLabel>
+        <ActionBtn
+          onClick={handleDownload}
+          icon="⬇️"
+          label="Download App File"
+          sub="Save as TaskVault.html — open in any browser on any device"
+          variant="primary"
+        />
+        {isMobile && (
+          <div style={{
+            background:"rgba(212,160,23,0.06)", border:"1px solid var(--gold-border)",
+            borderRadius:13, padding:"14px 16px", marginBottom:8,
+          }}>
+            <div style={{fontSize:11.5, fontWeight:700, color:"var(--gold-light)", marginBottom:8}}>
+              {isIOS ? "Install on iPhone / iPad" : "Install on Android"}
+            </div>
+            {isIOS ? (
+              <div style={{fontSize:12, color:"var(--text-dim)", lineHeight:2}}>
+                <div>1. Tap the <strong style={{color:"var(--text)"}}>Share button (□↑)</strong> in Safari</div>
+                <div>2. Scroll down → tap <strong style={{color:"var(--text)"}}>Add to Home Screen</strong></div>
+                <div>3. Tap <strong style={{color:"var(--text)"}}>Add</strong> — done!</div>
+              </div>
+            ) : (
+              <div style={{fontSize:12, color:"var(--text-dim)", lineHeight:2}}>
+                <div>1. Tap the <strong style={{color:"var(--text)"}}>⋮ menu</strong> in Chrome</div>
+                <div>2. Tap <strong style={{color:"var(--text)"}}>Install app</strong> or <strong style={{color:"var(--text)"}}>Add to Home screen</strong></div>
+                <div>3. Tap <strong style={{color:"var(--text)"}}>Install</strong> — done!</div>
+              </div>
+            )}
+          </div>
+        )}
+
+        <SectionLabel>✨ Auto Subtask Generator</SectionLabel>
+        <div style={{
+          background:"rgba(167,139,250,0.06)", border:"1px solid rgba(167,139,250,0.2)",
+          borderRadius:13, padding:"14px 16px", marginBottom:8,
+        }}>
+          <div style={{fontSize:13, fontWeight:600, color:"var(--purple)", marginBottom:8}}>
+            100% Free · Works Offline · No Account Needed
+          </div>
+          <div style={{fontSize:12, color:"rgba(196,181,253,0.7)", lineHeight:1.8}}>
+            Open any <strong style={{color:"var(--purple)"}}>Project</strong> card → expand it → tap <strong style={{color:"var(--purple)"}}>✨ Auto</strong> to instantly generate 6 smart subtasks based on your project title.<br/><br/>
+            It detects the project type automatically — website, app, event, travel, marketing, design, research, and 15+ more categories.
+          </div>
+        </div>
+
+        <SectionLabel>💾 Data Backup</SectionLabel>
+        <ActionBtn onClick={handleExport} icon="📤" label="Export Backup" sub="Download all tasks & projects as JSON"/>
+        <ActionBtn onClick={handleImport} icon="📥" label="Import Backup" sub="Restore from a previous backup file"/>
+
+        <div style={{
+          marginTop:16, padding:"12px 14px",
+          background:"rgba(255,255,255,0.02)", borderRadius:10,
+          border:"1px solid var(--border)",
+        }}>
+          <div style={{fontSize:11, color:"var(--text-muted)", lineHeight:1.8}}>
+            💾 All data is stored locally on this device<br/>
+            🔒 No account required, no data sent to servers<br/>
+            📂 Backup regularly to avoid losing your data
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Edit Modal ───────────────────────────────────────────────────────────────
+function EditModal({ item, onSave, onClose }) {
+  const [form, setForm] = useState({
+    title: item.title, description: item.description || "",
+    priority: item.priority, gift: item.gift || "",
+    dueDate: item.dueDate || "", tagInput:"", tags: item.tags || [],
+  });
+
+  const addTag = () => {
+    const t = form.tagInput.trim().toLowerCase().replace(/\s+/g,"-");
+    if (t && !form.tags.includes(t)) setForm(f=>({...f,tags:[...f.tags,t],tagInput:""}));
+    else setForm(f=>({...f,tagInput:""}));
+  };
+
+  return (
+    <div onClick={onClose} style={{
+      position:"fixed", inset:0, background:"rgba(0,0,0,0.82)",
+      display:"flex", alignItems:"flex-end", justifyContent:"center",
+      zIndex:200, backdropFilter:"blur(10px)", animation:"fadeIn 0.2s ease",
+    }}>
+      <div onClick={e=>e.stopPropagation()} style={{
+        background:"linear-gradient(180deg,#111009 0%,#0e0c08 100%)",
+        border:"1px solid var(--gold-border)",
+        borderTopLeftRadius:28, borderTopRightRadius:28,
+        padding:"28px 22px", paddingBottom:"max(40px,env(safe-area-inset-bottom,40px))",
+        width:"100%", maxWidth:500,
+        animation:"slideUp 0.3s cubic-bezier(0.22,1,0.36,1)",
+        maxHeight:"90vh", overflowY:"auto",
+      }}>
+        <div style={{width:40,height:4,borderRadius:4,background:"rgba(255,255,255,0.12)",margin:"0 auto 22px"}}/>
+
+        <div style={{display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:20}}>
+          <div style={{fontSize:18, fontWeight:700, color:"var(--text)", fontFamily:"'Playfair Display',serif"}}>Edit Item</div>
+          <button onClick={onClose} style={{
+            width:32,height:32,borderRadius:"50%",
+            border:"1px solid var(--border)",background:"var(--surface)",
+            cursor:"pointer",color:"var(--text-dim)",fontSize:14,
+            display:"flex",alignItems:"center",justifyContent:"center",
+          }}>✕</button>
+        </div>
+
+        {[
+          { val:form.title, key:"title", ph:"Title *", style:{} },
+        ].map(f => (
+          <Input key={f.key} value={f.val}
+            onChange={e=>setForm(p=>({...p,[f.key]:e.target.value}))}
+            placeholder={f.ph} style={{marginBottom:9,...f.style}}/>
+        ))}
+
+        <textarea value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))}
+          placeholder="Description (optional)" rows={2}
+          onFocus={e=>e.target.style.borderColor="rgba(212,160,23,0.4)"}
+          onBlur={e=>e.target.style.borderColor="var(--border)"}
+          style={{
+            width:"100%",background:"rgba(0,0,0,0.35)",
+            border:"1px solid var(--border)",borderRadius:12,
+            padding:"10px 14px",color:"var(--text)",fontSize:13,
+            fontFamily:"inherit",resize:"none",marginBottom:9,
+            transition:"border-color 0.2s",
+          }}/>
+
+        <div style={{marginBottom:10}}>
+          <div style={{fontSize:10,color:"var(--text-muted)",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:7,fontWeight:600}}>Priority</div>
+          <div style={{display:"flex",gap:6}}>
+            {["low","medium","high"].map(p=>(
+              <button key={p} onClick={()=>setForm(f=>({...f,priority:p}))} style={{
+                flex:1,padding:"8px 0",borderRadius:10,
+                background: form.priority===p ? PRI[p].bg : "rgba(0,0,0,0.25)",
+                color: form.priority===p ? PRI[p].color : "var(--text-muted)",
+                border: form.priority===p ? `1px solid ${PRI[p].color}55` : "1px solid transparent",
+                fontWeight:600,fontSize:12,cursor:"pointer",
+                textTransform:"capitalize",fontFamily:"inherit",
+                transition:"all 0.15s",
+              }}>{p}</button>
+            ))}
+          </div>
+        </div>
+
+        <div style={{marginBottom:10}}>
+          <div style={{fontSize:10,color:"var(--text-muted)",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:7,fontWeight:600}}>Due Date</div>
+          <input type="date" value={form.dueDate} onChange={e=>setForm(f=>({...f,dueDate:e.target.value}))}
+            style={{
+              width:"100%",background:"rgba(0,0,0,0.35)",
+              border:"1px solid var(--border)",borderRadius:12,
+              padding:"9px 13px",color:"var(--text)",fontSize:13,fontFamily:"inherit",colorScheme:"dark",
+            }}/>
+        </div>
+
+        <div style={{marginBottom:12}}>
+          <div style={{fontSize:10,color:"var(--text-muted)",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:7,fontWeight:600}}>Tags</div>
+          {form.tags.length > 0 && (
+            <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:8}}>
+              {form.tags.map(tag=>(
+                <span key={tag} style={{
+                  fontSize:11,padding:"3px 8px",borderRadius:20,display:"flex",alignItems:"center",gap:4,
+                  background:"rgba(212,160,23,0.1)",color:"rgba(212,160,23,0.85)",
+                  border:"1px solid rgba(212,160,23,0.22)",
+                }}>#{tag}
+                  <button onClick={()=>setForm(f=>({...f,tags:f.tags.filter(t=>t!==tag)}))} style={{
+                    background:"none",border:"none",cursor:"pointer",
+                    color:"rgba(212,160,23,0.55)",fontSize:9,padding:0,lineHeight:1,
+                  }}>✕</button>
+                </span>
+              ))}
+            </div>
+          )}
+          <div style={{display:"flex",gap:6}}>
+            <input value={form.tagInput} onChange={e=>setForm(f=>({...f,tagInput:e.target.value}))}
+              onKeyDown={e=>{if(e.key==="Enter"||e.key===","){e.preventDefault();addTag();}}}
+              placeholder="Add tag, press Enter"
+              style={{
+                flex:1,background:"rgba(0,0,0,0.35)",border:"1px solid var(--border)",
+                borderRadius:10,padding:"8px 12px",color:"var(--text)",fontSize:12.5,fontFamily:"inherit",
+              }}/>
+            <button onClick={addTag} style={{
+              padding:"8px 14px",borderRadius:10,border:"1px solid var(--gold-border)",
+              background:"var(--gold-dim)",color:"var(--gold-light)",
+              cursor:"pointer",fontSize:13,fontFamily:"inherit",fontWeight:600,
+            }}>+</button>
+          </div>
+        </div>
+
+        <div style={{position:"relative",marginBottom:18}}>
+          <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",fontSize:15}}>🎁</span>
+          <input value={form.gift} onChange={e=>setForm(f=>({...f,gift:e.target.value}))}
+            placeholder="Reward when done (optional)"
+            style={{
+              width:"100%",background:"rgba(212,160,23,0.05)",
+              border:"1px solid rgba(212,160,23,0.2)",borderRadius:12,
+              padding:"10px 14px 10px 35px",color:"var(--gold-light)",fontSize:13,fontFamily:"inherit",
+            }}/>
+        </div>
+
+        <div style={{display:"flex",gap:8}}>
+          <button onClick={onClose} style={{
+            flex:1,padding:"12px",borderRadius:12,
+            border:"1px solid var(--border)",background:"transparent",
+            color:"var(--text-dim)",cursor:"pointer",fontWeight:600,
+            fontSize:13,fontFamily:"inherit",
+          }}>Cancel</button>
+          <button
+            onClick={()=>form.title.trim()&&onSave({...form,title:form.title.trim(),tagInput:undefined})}
+            disabled={!form.title.trim()}
+            style={{
+              flex:2,padding:"12px",borderRadius:12,border:"none",
+              background:form.title.trim()?"linear-gradient(135deg,#c49012,#f5c842)":"var(--surface)",
+              color:form.title.trim()?"#1a0f00":"var(--text-muted)",
+              fontWeight:700,fontSize:14,
+              cursor:form.title.trim()?"pointer":"default",
+              fontFamily:"inherit",
+              boxShadow:form.title.trim()?"0 4px 16px rgba(212,160,23,0.3)":"none",
+            }}>Save Changes</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Subtask Row ──────────────────────────────────────────────────────────────
+function SubtaskRow({ sub, onToggle, onDelete }) {
+  return (
+    <div style={{
+      display:"flex",alignItems:"center",gap:8,padding:"7px 10px",
+      borderRadius:9,transition:"background 0.15s",
+      background:"rgba(255,255,255,0.02)",marginBottom:3,
+    }}
+    onMouseEnter={e=>e.currentTarget.style.background="rgba(255,255,255,0.05)"}
+    onMouseLeave={e=>e.currentTarget.style.background="rgba(255,255,255,0.02)"}>
+      <button onClick={()=>onToggle(sub.id)} style={{
+        width:18,height:18,borderRadius:5,flexShrink:0,
+        border:`2px solid ${sub.completed?"var(--green)":"rgba(255,255,255,0.2)"}`,
+        background:sub.completed?"var(--green)":"transparent",
+        cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",
+        transition:"all 0.2s",
+      }}>
+        {sub.completed && (
+          <svg width="9" height="9" viewBox="0 0 12 12" fill="none">
+            <path d="M2 6l3 3 5-5" stroke="#1a1207" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        )}
+      </button>
+      <span style={{
+        fontSize:12.5,flex:1,lineHeight:1.4,
+        color:sub.completed?"rgba(255,255,255,0.28)":"rgba(255,255,255,0.7)",
+        textDecoration:sub.completed?"line-through":"none",
+        transition:"all 0.2s",
+      }}>{sub.title}</span>
+      <button onClick={()=>onDelete(sub.id)} style={{
+        width:18,height:18,borderRadius:5,border:"none",
+        background:"none",cursor:"pointer",
+        color:"rgba(255,100,100,0.35)",fontSize:11,
+        display:"flex",alignItems:"center",justifyContent:"center",
+        flexShrink:0,transition:"color 0.15s",
+      }}
+      onMouseEnter={e=>e.currentTarget.style.color="rgba(255,100,100,0.8)"}
+      onMouseLeave={e=>e.currentTarget.style.color="rgba(255,100,100,0.35)"}>✕</button>
+    </div>
+  );
+}
+
+// ─── Item Card ────────────────────────────────────────────────────────────────
+function ItemCard({
+  item, onToggle, onDelete, onShowGift, onEdit,
+  onToggleSubtask, onAddSubtask, onDeleteSubtask,
+  onAutoBreakdown, aiLoading,
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [newSub, setNewSub]     = useState("");
+  const subInputRef             = useRef(null);
+  const due                     = fmtDue(item.dueDate);
+  const subtasksDone            = (item.subtasks||[]).filter(s=>s.completed).length;
+  const subtasksTotal           = (item.subtasks||[]).length;
+  const subPct                  = subtasksTotal > 0 ? (subtasksDone/subtasksTotal)*100 : 0;
+  const isProject               = item.type === "project";
+
+  const handleAddSub = () => {
+    const t = newSub.trim();
+    if (!t) return;
+    onAddSubtask(item.id, t);
+    setNewSub("");
+  };
+
+  return (
+    <div className="card-hover" style={{
+      background: item.completed ? "rgba(255,255,255,0.018)" : "rgba(255,255,255,0.048)",
+      border:`1px solid ${item.completed?"rgba(255,255,255,0.055)":"rgba(255,255,255,0.095)"}`,
+      borderLeft:`3px solid ${item.completed?"rgba(255,255,255,0.06)":PRI[item.priority].color}`,
+      borderRadius:16,padding:"14px 14px 14px 13px",marginBottom:9,
+      transition:"all 0.2s ease",opacity:item.completed?0.52:1,
+    }}>
+      <div style={{display:"flex",alignItems:"flex-start",gap:11}}>
+        {/* Checkbox */}
+        <button onClick={()=>onToggle(item.id)} style={{
+          width:24,height:24,borderRadius:8,flexShrink:0,
+          border:`2px solid ${item.completed?"var(--green)":"rgba(255,255,255,0.2)"}`,
+          background:item.completed?"var(--green)":"transparent",
+          cursor:"pointer",marginTop:1,
+          display:"flex",alignItems:"center",justifyContent:"center",
+          transition:"all 0.25s ease",
+        }}>
+          {item.completed && (
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+              <path d="M2 6l3 3 5-5" stroke="#1a1207" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          )}
+        </button>
+
+        {/* Main content */}
+        <div style={{flex:1,minWidth:0}}>
+          {/* Badges row */}
+          <div style={{display:"flex",alignItems:"center",gap:5,flexWrap:"wrap",marginBottom:5}}>
+            <span style={{
+              fontSize:9.5,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",
+              padding:"2px 8px",borderRadius:20,
+              background:isProject?"rgba(167,139,250,0.14)":"rgba(96,165,250,0.14)",
+              color:isProject?"var(--purple)":"var(--blue)",
+              border:`1px solid ${isProject?"rgba(167,139,250,0.25)":"rgba(96,165,250,0.25)"}`,
+            }}>{isProject?"🗂 Project":"✅ Task"}</span>
+
+            <span style={{
+              fontSize:9.5,fontWeight:700,letterSpacing:"0.07em",textTransform:"uppercase",
+              padding:"2px 8px",borderRadius:20,
+              background:PRI[item.priority].bg,
+              color:PRI[item.priority].color,
+              border:`1px solid ${PRI[item.priority].color}33`,
+            }}>{PRI[item.priority].label}</span>
+
+            {due && !item.completed && (
+              <span style={{
+                fontSize:9.5,fontWeight:700,color:due.color,
+                background:`${due.color}14`,border:`1px solid ${due.color}33`,
+                padding:"2px 8px",borderRadius:20,
+              }}>{due.label}</span>
+            )}
+          </div>
+
+          {/* Title */}
+          <div onClick={()=>setExpanded(e=>!e)} style={{
+            color:item.completed?"rgba(255,255,255,0.32)":"var(--text)",
+            fontWeight:600,fontSize:14.5,cursor:"pointer",
+            textDecoration:item.completed?"line-through":"none",
+            lineHeight:1.4,marginBottom:item.tags?.length>0?5:0,
+            display:"flex",alignItems:"center",gap:7,
+          }}>
+            {item.title}
+            {(item.description || subtasksTotal > 0) && (
+              <span style={{
+                color:"var(--text-muted)",fontSize:11,
+                transform:expanded?"rotate(180deg)":"none",
+                transition:"transform 0.2s",flexShrink:0,
+              }}>▾</span>
+            )}
+          </div>
+
+          {/* Tags */}
+          {item.tags?.length > 0 && (
+            <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:6}}>
+              {item.tags.map(tag=>(
+                <span key={tag} style={{
+                  fontSize:10,padding:"2px 8px",borderRadius:20,
+                  background:"rgba(212,160,23,0.08)",color:"rgba(212,160,23,0.8)",
+                  border:"1px solid rgba(212,160,23,0.18)",
+                }}>#{tag}</span>
+              ))}
+            </div>
+          )}
+
+          {/* Subtask progress bar */}
+          {subtasksTotal > 0 && (
+            <div style={{marginTop:7,marginBottom:2}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                <span style={{fontSize:10.5,color:"var(--text-muted)",fontFamily:"'IBM Plex Mono',monospace"}}>
+                  {subtasksDone}/{subtasksTotal} subtasks
+                </span>
+                <span style={{
+                  fontSize:10.5,fontFamily:"'IBM Plex Mono',monospace",fontWeight:600,
+                  color:subPct===100?"var(--green)":"var(--text-dim)",
+                }}>{Math.round(subPct)}%</span>
+              </div>
+              <div style={{height:4,borderRadius:10,background:"rgba(255,255,255,0.07)",overflow:"hidden"}}>
+                <div style={{
+                  height:"100%",borderRadius:10,transition:"width 0.5s ease",
+                  background:subPct===100?"var(--green)":"linear-gradient(90deg,#c49012,#f5c842)",
+                  width:`${subPct}%`,
+                }}/>
+              </div>
+            </div>
+          )}
+
+          {/* Gift pill */}
+          {item.gift && (
+            <div style={{marginTop:6}}>
+              <span style={{
+                fontSize:11,color:item.completed?"var(--gold-light)":"rgba(212,160,23,0.5)",
+                fontStyle:"italic",
+              }}>🎁 {item.completed ? item.gift : "Reward locked"}</span>
+            </div>
+          )}
+
+          {/* Date */}
+          <div style={{color:"var(--text-muted)",fontSize:10,marginTop:5,fontFamily:"'IBM Plex Mono',monospace"}}>
+            {new Date(item.createdAt).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})}
+          </div>
+
+          {/* ── Expanded section ── */}
+          {expanded && (
+            <div style={{marginTop:10,animation:"slideDown 0.2s ease"}}>
+              {item.description && (
+                <div style={{
+                  color:"rgba(255,255,255,0.42)",fontSize:12.5,lineHeight:1.7,
+                  padding:"10px 13px",marginBottom:10,
+                  background:"rgba(255,255,255,0.025)",borderRadius:10,
+                  border:"1px solid rgba(255,255,255,0.055)",
+                }}>{item.description}</div>
+              )}
+
+              {/* Subtasks list */}
+              {subtasksTotal > 0 && (
+                <div style={{marginBottom:10}}>
+                  {(item.subtasks||[]).map(sub=>(
+                    <SubtaskRow
+                      key={sub.id} sub={sub}
+                      onToggle={id=>onToggleSubtask(item.id,id)}
+                      onDelete={id=>onDeleteSubtask(item.id,id)}
+                    />
+                  ))}
+                </div>
+              )}
+
+              {/* Add subtask (projects or tasks) */}
+              <div style={{display:"flex",gap:6,marginTop:4}}>
+                <input
+                  ref={subInputRef}
+                  value={newSub}
+                  onChange={e=>setNewSub(e.target.value)}
+                  onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();handleAddSub();}}}
+                  placeholder={`+ Add subtask${isProject?" to project":""}`}
+                  style={{
+                    flex:1,background:"rgba(0,0,0,0.35)",
+                    border:"1px solid rgba(255,255,255,0.09)",borderRadius:9,
+                    padding:"7px 11px",color:"var(--text)",fontSize:12.5,
+                    fontFamily:"inherit",outline:"none",
+                  }}
+                  onFocus={e=>e.target.style.borderColor="rgba(212,160,23,0.4)"}
+                  onBlur={e=>e.target.style.borderColor="rgba(255,255,255,0.09)"}
+                />
+                <button onClick={handleAddSub} disabled={!newSub.trim()} style={{
+                  padding:"7px 12px",borderRadius:9,border:"none",
+                  background:newSub.trim()?"var(--gold)":"rgba(255,255,255,0.05)",
+                  color:newSub.trim()?"#1a0f00":"var(--text-muted)",
+                  cursor:newSub.trim()?"pointer":"default",
+                  fontWeight:700,fontSize:13,fontFamily:"inherit",
+                  transition:"all 0.15s",
+                }}>Add</button>
+                {isProject && !item.completed && (
+                  <button
+                    onClick={()=>onAutoBreakdown(item)}
+                    disabled={aiLoading===item.id}
+                    title="AI: Generate subtasks"
+                    style={{
+                      padding:"7px 11px",borderRadius:9,
+                      border:"1px solid rgba(167,139,250,0.3)",
+                      background:"rgba(167,139,250,0.08)",
+                      color:aiLoading===item.id?"rgba(196,181,253,0.3)":"var(--purple)",
+                      cursor:aiLoading===item.id?"default":"pointer",
+                      fontSize:12,fontFamily:"inherit",
+                      animation:aiLoading===item.id?"shimmer 1s infinite":undefined,
+                      whiteSpace:"nowrap",
+                    }}>
+                    {aiLoading===item.id?"⏳ ...":"✨ Auto"}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Action buttons */}
+        <div style={{display:"flex",flexDirection:"column",gap:5,flexShrink:0}}>
+          {item.completed && item.gift && (
+            <button onClick={()=>onShowGift(item)} title="View reward" style={{
+              width:30,height:30,borderRadius:8,
+              border:"1px solid rgba(212,160,23,0.35)",
+              background:"rgba(212,160,23,0.09)",
+              cursor:"pointer",fontSize:14,
+              display:"flex",alignItems:"center",justifyContent:"center",
+              transition:"all 0.15s",
+            }}
+            onMouseEnter={e=>e.currentTarget.style.background="rgba(212,160,23,0.2)"}
+            onMouseLeave={e=>e.currentTarget.style.background="rgba(212,160,23,0.09)"}>🎁</button>
+          )}
+          <button onClick={()=>onEdit(item)} title="Edit" style={{
+            width:30,height:30,borderRadius:8,
+            border:"1px solid var(--border)",
+            background:"var(--surface)",
+            cursor:"pointer",fontSize:13,
+            display:"flex",alignItems:"center",justifyContent:"center",
+            color:"var(--text-dim)",transition:"all 0.15s",
+          }}
+          onMouseEnter={e=>e.currentTarget.style.background="rgba(255,255,255,0.1)"}
+          onMouseLeave={e=>e.currentTarget.style.background="var(--surface)"}>✎</button>
+          <button onClick={()=>onDelete(item.id)} title="Delete" style={{
+            width:30,height:30,borderRadius:8,
+            border:"1px solid rgba(255,100,100,0.18)",
+            background:"rgba(255,100,100,0.03)",
+            cursor:"pointer",fontSize:12,
+            display:"flex",alignItems:"center",justifyContent:"center",
+            color:"rgba(255,120,120,0.45)",transition:"all 0.15s",
+          }}
+          onMouseEnter={e=>e.currentTarget.style.background="rgba(255,100,100,0.12)"}
+          onMouseLeave={e=>e.currentTarget.style.background="rgba(255,100,100,0.03)"}>✕</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Add Form ─────────────────────────────────────────────────────────────────
+function AddForm({ onAdd, onCancel }) {
+  const [form, setForm] = useState(EMPTY_FORM);
+  const inputRef = useRef(null);
+
+  useEffect(()=>{ setTimeout(()=>inputRef.current?.focus(), 80); },[]);
+
+  const addTag = () => {
+    const t = (form.tagInput||"").trim().toLowerCase().replace(/\s+/g,"-");
+    if (t && !form.tags.includes(t)) setForm(f=>({...f,tags:[...f.tags,t],tagInput:""}));
+    else setForm(f=>({...f,tagInput:""}));
+  };
+
+  const handleAdd = () => {
+    if (!form.title.trim()) return;
+    const extraTag = form.tagInput?.trim() ? form.tagInput.trim().toLowerCase().replace(/\s+/g,"-") : null;
+    const tags = extraTag && !form.tags.includes(extraTag) ? [...form.tags,extraTag] : form.tags;
+    onAdd({ ...form, title:form.title.trim(), description:form.description.trim(), gift:form.gift.trim(), tags });
+  };
+
+  const fieldStyle = { marginBottom:8 };
+
+  return (
+    <div style={{
+      margin:"0 20px 12px",
+      background:"rgba(255,255,255,0.04)",
+      border:"1px solid var(--gold-border)",
+      borderRadius:20,padding:"20px 18px",
+      animation:"slideDown 0.25s ease",
+    }}>
+      <div style={{
+        fontSize:11,fontWeight:700,letterSpacing:"0.1em",
+        textTransform:"uppercase",color:"var(--gold)",marginBottom:16,
+      }}>New Item</div>
+
+      {/* Type toggle */}
+      <div style={{display:"flex",background:"rgba(0,0,0,0.35)",borderRadius:11,padding:3,marginBottom:12,gap:3}}>
+        {["task","project"].map(t=>(
+          <button key={t} onClick={()=>setForm(f=>({...f,type:t}))} style={{
+            flex:1,padding:"8px 0",borderRadius:9,border:"none",
+            background:form.type===t
+              ? t==="project"?"rgba(167,139,250,0.18)":"rgba(96,165,250,0.18)"
+              : "transparent",
+            color:form.type===t
+              ? t==="project"?"var(--purple)":"var(--blue)"
+              : "var(--text-muted)",
+            fontWeight:700,fontSize:11.5,cursor:"pointer",fontFamily:"inherit",
+            textTransform:"uppercase",letterSpacing:"0.06em",transition:"all 0.2s",
+          }}>{t==="project"?"🗂 Project":"✅ Task"}</button>
+        ))}
+      </div>
+
+      <div style={fieldStyle}>
+        <Input ref={inputRef} value={form.title}
+          onChange={e=>setForm(f=>({...f,title:e.target.value}))}
+          onKeyDown={e=>e.key==="Enter"&&handleAdd()}
+          placeholder="Title *"/>
+      </div>
+
+      <div style={fieldStyle}>
+        <textarea value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))}
+          placeholder="Description (optional)" rows={2}
+          onFocus={e=>e.target.style.borderColor="rgba(212,160,23,0.4)"}
+          onBlur={e=>e.target.style.borderColor="var(--border)"}
+          style={{
+            width:"100%",background:"rgba(0,0,0,0.35)",
+            border:"1px solid var(--border)",borderRadius:12,
+            padding:"10px 14px",color:"var(--text)",fontSize:13,
+            fontFamily:"inherit",resize:"none",outline:"none",
+            transition:"border-color 0.2s",
+          }}/>
+      </div>
+
+      {/* Priority */}
+      <div style={{marginBottom:10}}>
+        <div style={{fontSize:9.5,color:"var(--text-muted)",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:6,fontWeight:600}}>Priority</div>
+        <div style={{display:"flex",gap:5}}>
+          {["low","medium","high"].map(p=>(
+            <button key={p} onClick={()=>setForm(f=>({...f,priority:p}))} style={{
+              flex:1,padding:"7px 0",borderRadius:9,
+              background:form.priority===p?PRI[p].bg:"rgba(0,0,0,0.25)",
+              color:form.priority===p?PRI[p].color:"var(--text-muted)",
+              border:form.priority===p?`1px solid ${PRI[p].color}55`:"1px solid transparent",
+              fontWeight:600,fontSize:11.5,cursor:"pointer",
+              textTransform:"capitalize",fontFamily:"inherit",transition:"all 0.15s",
+            }}>{p}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* Due date */}
+      <div style={{marginBottom:10}}>
+        <div style={{fontSize:9.5,color:"var(--text-muted)",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:6,fontWeight:600}}>Due Date</div>
+        <input type="date" value={form.dueDate} onChange={e=>setForm(f=>({...f,dueDate:e.target.value}))}
+          style={{
+            width:"100%",background:"rgba(0,0,0,0.35)",
+            border:"1px solid var(--border)",borderRadius:12,
+            padding:"9px 13px",color:"var(--text)",fontSize:13,fontFamily:"inherit",colorScheme:"dark",
+          }}/>
+      </div>
+
+      {/* Tags */}
+      {form.tags.length > 0 && (
+        <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:7}}>
+          {form.tags.map(tag=>(
+            <span key={tag} style={{
+              fontSize:10.5,padding:"3px 9px",borderRadius:20,
+              display:"flex",alignItems:"center",gap:4,
+              background:"rgba(212,160,23,0.09)",color:"rgba(212,160,23,0.85)",
+              border:"1px solid rgba(212,160,23,0.2)",
+            }}>#{tag}
+              <button onClick={()=>setForm(f=>({...f,tags:f.tags.filter(t=>t!==tag)}))} style={{
+                background:"none",border:"none",cursor:"pointer",
+                color:"rgba(212,160,23,0.5)",fontSize:9,padding:0,
+              }}>✕</button>
+            </span>
+          ))}
+        </div>
+      )}
+      <div style={{display:"flex",gap:6,marginBottom:10}}>
+        <input value={form.tagInput||""} onChange={e=>setForm(f=>({...f,tagInput:e.target.value}))}
+          onKeyDown={e=>{if(e.key==="Enter"||e.key===","){e.preventDefault();addTag();}}}
+          placeholder="# Tag, press Enter"
+          style={{
+            flex:1,background:"rgba(0,0,0,0.35)",border:"1px solid var(--border)",
+            borderRadius:10,padding:"8px 12px",color:"var(--text)",fontSize:12.5,fontFamily:"inherit",
+            outline:"none",
+          }}/>
+      </div>
+
+      {/* Reward */}
+      <div style={{position:"relative",marginBottom:14}}>
+        <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",fontSize:15}}>🎁</span>
+        <input value={form.gift} onChange={e=>setForm(f=>({...f,gift:e.target.value}))}
+          placeholder="Reward when done (optional)"
+          style={{
+            width:"100%",background:"rgba(212,160,23,0.05)",
+            border:"1px solid rgba(212,160,23,0.18)",borderRadius:12,
+            padding:"10px 14px 10px 36px",color:"var(--gold-light)",fontSize:13,
+            fontFamily:"inherit",outline:"none",
+          }}/>
+      </div>
+
+      <div style={{display:"flex",gap:7}}>
+        <button onClick={onCancel} style={{
+          flex:1,padding:"11px 0",borderRadius:11,
+          border:"1px solid var(--border)",background:"transparent",
+          color:"var(--text-dim)",cursor:"pointer",fontWeight:600,
+          fontSize:13,fontFamily:"inherit",
+        }}>Cancel</button>
+        <button onClick={handleAdd} disabled={!form.title.trim()} style={{
+          flex:2,padding:"11px 0",borderRadius:11,border:"none",
+          background:form.title.trim()?"linear-gradient(135deg,#c49012,#f5c842)":"var(--surface)",
+          color:form.title.trim()?"#1a0f00":"var(--text-muted)",
+          fontWeight:700,fontSize:14,
+          cursor:form.title.trim()?"pointer":"default",
+          fontFamily:"inherit",transition:"all 0.2s",
+          boxShadow:form.title.trim()?"0 4px 16px rgba(212,160,23,0.3)":"none",
+        }}>Add {form.type==="project"?"Project":"Task"}</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── App ──────────────────────────────────────────────────────────────────────
+function TaskVault() {
+  const [items,      setItems]      = useState([]);
+  const [filter,     setFilter]     = useState("all");
+  const [search,     setSearch]     = useState("");
+  const [sortBy,     setSortBy]     = useState("newest");
+  const [showSort,   setShowSort]   = useState(false);
+  const [showAdd,    setShowAdd]    = useState(false);
+  const [giftItem,   setGiftItem]   = useState(null);
+  const [editItem,   setEditItem]   = useState(null);
+  const [showSettings,setShowSettings]=useState(false);
+  const [loaded,     setLoaded]     = useState(false);
+  const [aiLoading,  setAILoading]  = useState(null);
+  const [winW,       setWinW]       = useState(window.innerWidth);
+  const isDesktop = winW >= 820;
+
+  useEffect(()=>{
+    const onResize = ()=>setWinW(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return ()=>window.removeEventListener("resize", onResize);
+  },[]);
+
+  // ── Load ────────────────────────────────────────────────────────────────────
+  useEffect(()=>{
+    (async()=>{
+      try { const r = await storage.get(LOCAL_KEY); if(r?.value) setItems(JSON.parse(r.value)); } catch {}
+      setLoaded(true);
+    })();
+  },[]);
+
+  // ── Auto-save ───────────────────────────────────────────────────────────────
+  useEffect(()=>{ if(loaded) storage.set(LOCAL_KEY,JSON.stringify(items)).catch(()=>{}); },[items,loaded]);
+
+  // ── CRUD ────────────────────────────────────────────────────────────────────
+  const addItem = useCallback((formData)=>{
+    setItems(prev=>[{
+      id:genId(), title:formData.title,
+      description:formData.description, type:formData.type,
+      gift:formData.gift, priority:formData.priority,
+      dueDate:formData.dueDate, tags:formData.tags,
+      subtasks:[], completed:false, createdAt:Date.now(),
+    },...prev]);
+    setShowAdd(false);
+  },[]);
+
+  const toggleItem = useCallback((id)=>{
+    setItems(prev=>prev.map(it=>{
+      if(it.id!==id) return it;
+      const nowDone = !it.completed;
+      if(nowDone && it.gift) setGiftItem({...it,completed:true});
+      return {...it,completed:nowDone};
+    }));
+  },[]);
+
+  const deleteItem = useCallback((id)=>setItems(prev=>prev.filter(it=>it.id!==id)),[]);
+
+  const saveEdit = useCallback((id,updates)=>{
+    setItems(prev=>prev.map(it=>it.id===id?{...it,...updates}:it));
+    setEditItem(null);
+  },[]);
+
+  const toggleSubtask = useCallback((itemId,subId)=>{
+    setItems(prev=>prev.map(it=>{
+      if(it.id!==itemId) return it;
+      return {...it,subtasks:it.subtasks.map(s=>s.id===subId?{...s,completed:!s.completed}:s)};
+    }));
+  },[]);
+
+  const addSubtask = useCallback((itemId,title)=>{
+    setItems(prev=>prev.map(it=>{
+      if(it.id!==itemId) return it;
+      return {...it,subtasks:[...(it.subtasks||[]),{id:genId(),title,completed:false}]};
+    }));
+  },[]);
+
+  const deleteSubtask = useCallback((itemId,subId)=>{
+    setItems(prev=>prev.map(it=>{
+      if(it.id!==itemId) return it;
+      return {...it,subtasks:it.subtasks.filter(s=>s.id!==subId)};
+    }));
+  },[]);
+
+  // ── Smart Breakdown (free, offline, no API key) ───────────────────────────────
+  const smartBreakdown = useCallback((item)=>{
+    setAILoading(item.id);
+
+    const text = (item.title+" "+(item.description||"")).toLowerCase();
+
+    const TEMPLATES = {
+      website:   ["Define goals, audience & sitemap","Create wireframes and layout design","Build HTML/CSS structure and styling","Add interactivity and functionality","Test on mobile, tablet and desktop","Review content and fix any issues","Launch and monitor performance"],
+      app:       ["Write user stories and feature list","Design UI/UX wireframes and flow","Set up project and dev environment","Build core screens and navigation","Implement main features and logic","Test on devices and fix bugs","Prepare and submit for release"],
+      design:    ["Gather inspiration and references","Define style guide (colors, fonts, tone)","Sketch initial concepts","Create detailed design mockups","Collect feedback and revise","Export final assets in all formats"],
+      research:  ["Define research question and scope","Review existing literature and data","Design data collection method","Gather and record findings","Analyze patterns and draw insights","Write and format final report"],
+      report:    ["Clarify objectives and audience","Outline sections and key points","Collect all necessary data","Write first draft of each section","Add charts, visuals or evidence","Proofread, format and finalize"],
+      event:     ["Set date, venue, and budget","Create guest list and send invitations","Arrange catering and logistics","Plan agenda, activities and schedule","Confirm all vendors and bookings","Day-of setup and coordination checklist"],
+      wedding:   ["Set budget and guest count","Book venue and key vendors","Send save-the-dates and invitations","Plan ceremony and reception details","Organize catering and cake","Finalize timeline for the day"],
+      marketing: ["Define target audience and goals","Research competitors and market","Create content plan and calendar","Produce visuals and copy","Set up platforms and schedule posts","Launch campaign and track results"],
+      social:    ["Audit current profiles and content","Define posting schedule and themes","Create a content bank (posts, visuals)","Write captions and add hashtags","Schedule and publish content","Analyze engagement and adjust strategy"],
+      travel:    ["Set destination, dates, and budget","Book flights and accommodation","Research activities and attractions","Arrange transport and transfers","Prepare travel documents and packing list","Final checks before departure"],
+      move:      ["Sort belongings — keep, donate, discard","Research movers or rental truck","Pack room by room with clear labels","Notify utilities, bank, and postal address","Complete moving day coordination","Unpack and arrange new space"],
+      finance:   ["Gather all relevant financial documents","Categorize and organize transactions","Reconcile and verify all figures","Identify discrepancies or gaps","Prepare summary report or filing","Review, sign off, and submit"],
+      budget:    ["List all income sources","Track all fixed monthly expenses","Estimate variable and irregular costs","Identify areas to cut or save","Set savings targets and timeline","Review budget monthly and adjust"],
+      fitness:   ["Define specific fitness goals and timeline","Design weekly workout schedule","Plan meals and grocery list","Log workouts and track progress","Review results every two weeks","Celebrate milestones and adjust plan"],
+      learning:  ["Define what you want to achieve","Find the best courses or resources","Build a weekly study schedule","Complete lessons and take notes","Practice with real exercises or projects","Review knowledge and fill any gaps"],
+      writing:   ["Brainstorm ideas and choose angle","Create detailed outline","Research and gather supporting material","Write complete first draft","Revise for clarity, flow and tone","Proofread, format and publish"],
+      video:     ["Write script or shot list","Gather equipment and plan locations","Film all required footage","Review and select best takes","Edit video and add music/captions","Export, upload and share"],
+      product:   ["Define product requirements and specs","Sketch concepts and choose direction","Build prototype or MVP","Test with real users, collect feedback","Refine based on feedback","Prepare for production or launch"],
+      hiring:    ["Write detailed job description","Post on relevant platforms","Screen incoming applications","Conduct first-round interviews","Do reference or background checks","Make offer and onboard new hire"],
+      launch:    ["Define launch goals and success metrics","Build pre-launch buzz and waitlist","Prepare all launch assets and copy","Set up tracking and analytics","Execute launch day plan","Gather feedback and iterate quickly"],
+    };
+
+    const KEYWORDS = {
+      website:  ["website","web","landing","portfolio","blog","ecommerce","store","online shop","webpage"],
+      app:      ["app","application","mobile","ios","android","software","platform","saas","dashboard"],
+      design:   ["design","logo","brand","ui","ux","mockup","prototype","visual","graphic","illustration"],
+      research: ["research","study","investigate","survey","analysis","findings","literature"],
+      report:   ["report","document","proposal","presentation","paper","thesis","write-up"],
+      event:    ["event","conference","seminar","meetup","party","ceremony","launch event","workshop"],
+      wedding:  ["wedding","bride","groom","ceremony","reception","honeymoon"],
+      marketing:["marketing","campaign","advertis","promote","seo","email blast","outreach"],
+      social:   ["social media","instagram","tiktok","twitter","facebook","youtube","content creator","followers"],
+      travel:   ["travel","trip","vacation","holiday","flight","hotel","tour","itinerary","backpack"],
+      move:     ["moving","move","relocation","new apartment","new house","new office"],
+      finance:  ["finance","accounting","invoice","tax","payroll","bookkeeping","audit","spreadsheet"],
+      budget:   ["budget","spending","savings","expenses","monthly costs","financial plan"],
+      fitness:  ["workout","fitness","gym","exercise","diet","weight","run","training","nutrition"],
+      learning: ["learn","course","study","tutorial","certification","training","skill","language"],
+      writing:  ["write","article","book","essay","newsletter","copywriting","content","post"],
+      video:    ["video","film","youtube","reel","documentary","podcast","recording","edit"],
+      product:  ["product","feature","mvp","prototype","build","develop","create","make"],
+      hiring:   ["hire","hiring","recruit","job posting","candidate","interview","onboard"],
+      launch:   ["launch","release","ship","go live","rollout","announce","debut"],
+    };
+
+    // Score each category
+    let bestCat = null, bestScore = 0;
+    for (const [cat, keywords] of Object.entries(KEYWORDS)) {
+      const score = keywords.filter(k => text.includes(k)).length;
+      if (score > bestScore) { bestScore = score; bestCat = cat; }
+    }
+
+    const generic = [
+      "Define scope, goals and success criteria",
+      "Break down requirements and gather resources",
+      "Create timeline and assign priorities",
+      "Execute the core work step by step",
+      "Review quality and test thoroughly",
+      "Finalize, deliver and wrap up",
+    ];
+
+    const chosen = (bestCat && bestScore > 0) ? TEMPLATES[bestCat] : generic;
+    const result = chosen.slice(0, 6);
+
+    // Slight delay for UX feedback
+    setTimeout(()=>{
+      setItems(prev=>prev.map(it=>{
+        if(it.id!==item.id) return it;
+        const newSubs = result.map(title=>({id:genId(),title,completed:false}));
+        return {...it,subtasks:[...(it.subtasks||[]),...newSubs]};
+      }));
+      setAILoading(null);
+    }, 600);
+  },[]);
+
+  // ── Filter + Sort ─────────────────────────────────────────────────────────
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  const filtered = items
+    .filter(it=>{
+      if(filter==="tasks")    return it.type==="task";
+      if(filter==="projects") return it.type==="project";
+      if(filter==="done")     return it.completed;
+      if(filter==="active")   return !it.completed;
+      if(filter==="overdue")  return !it.completed&&it.dueDate&&new Date(it.dueDate+"T00:00:00")<today;
+      return true;
+    })
+    .filter(it=>{
+      if(!search) return true;
+      const s = search.toLowerCase();
+      return it.title.toLowerCase().includes(s)
+        ||it.description?.toLowerCase().includes(s)
+        ||it.tags?.some(t=>t.includes(s));
+    })
+    .sort((a,b)=>{
+      if(sortBy==="priority"){const o={high:0,medium:1,low:2};return o[a.priority]-o[b.priority];}
+      if(sortBy==="dueDate"){
+        if(!a.dueDate&&!b.dueDate)return 0;
+        if(!a.dueDate)return 1;if(!b.dueDate)return -1;
+        return new Date(a.dueDate)-new Date(b.dueDate);
+      }
+      if(sortBy==="progress"){
+        const pa=(a.subtasks?.length>0?(a.subtasks.filter(s=>s.completed).length/a.subtasks.length):a.completed?1:0);
+        const pb=(b.subtasks?.length>0?(b.subtasks.filter(s=>s.completed).length/b.subtasks.length):b.completed?1:0);
+        return pb-pa;
+      }
+      if(sortBy==="oldest") return a.createdAt-b.createdAt;
+      if(sortBy==="alpha")  return a.title.localeCompare(b.title);
+      return b.createdAt-a.createdAt;
+    });
+
+  const overdue = items.filter(i=>!i.completed&&i.dueDate&&new Date(i.dueDate+"T00:00:00")<today).length;
+  const done    = items.filter(i=>i.completed).length;
+  const pct     = items.length > 0 ? Math.round((done/items.length)*100) : 0;
+
+  return (
+    <div style={{
+      minHeight:"100vh",
+      background:"linear-gradient(160deg,#0a0805 0%,#0e0b08 50%,#0b0a10 100%)",
+      fontFamily:"'DM Sans','Segoe UI',sans-serif",color:"var(--text)",
+      maxWidth:520,margin:"0 auto",position:"relative",
+    }}>
+
+      {/* Background orbs */}
+      <div style={{
+        position:"fixed",top:-100,right:-100,width:350,height:350,borderRadius:"50%",
+        background:"radial-gradient(circle,rgba(212,160,23,0.08) 0%,transparent 65%)",
+        pointerEvents:"none",zIndex:0,
+      }}/>
+      <div style={{
+        position:"fixed",bottom:80,left:-120,width:380,height:380,borderRadius:"50%",
+        background:"radial-gradient(circle,rgba(167,139,250,0.05) 0%,transparent 65%)",
+        pointerEvents:"none",zIndex:0,
+      }}/>
+
+      <div style={{position:"relative",zIndex:1}}>
+
+        {/* ── Header ── */}
+        <div style={{padding:"max(52px,env(safe-area-inset-top,52px)) 22px 0"}}>
+          <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between"}}>
+            <div>
+              <div style={{
+                fontSize:9.5,letterSpacing:"0.22em",textTransform:"uppercase",
+                color:"var(--gold)",marginBottom:5,fontWeight:700,
+              }}>My Workspace</div>
+              <h1 style={{
+                fontFamily:"'Playfair Display',serif",fontSize:34,fontWeight:900,lineHeight:1,
+                background:"linear-gradient(135deg,#f5c842 0%,#d4a017 50%,#f5c842 100%)",
+                WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",letterSpacing:"-0.02em",
+              }}>TaskVault</h1>
+              <p style={{color:"var(--text-muted)",fontSize:12,marginTop:5}}>
+                Projects · Tasks · Rewards
+              </p>
+            </div>
+            <button onClick={()=>setShowSettings(true)} style={{
+              display:"flex",alignItems:"center",gap:6,
+              padding:"8px 13px",borderRadius:22,
+              border:"1px solid var(--gold-border)",
+              background:"rgba(212,160,23,0.04)",cursor:"pointer",marginTop:8,
+              transition:"all 0.15s",
+            }}
+            onMouseEnter={e=>e.currentTarget.style.background="rgba(212,160,23,0.12)"}
+            onMouseLeave={e=>e.currentTarget.style.background="rgba(212,160,23,0.04)"}>
+              <span style={{fontSize:13}}>⚙️</span>
+              <span style={{fontSize:11,color:"var(--text-dim)",fontWeight:600}}>Settings</span>
+            </button>
+          </div>
+
+          {/* Completion arc */}
+          {items.length > 0 && (
+            <div style={{
+              marginTop:18,padding:"14px 16px",
+              background:"rgba(255,255,255,0.03)",
+              border:"1px solid var(--border)",
+              borderRadius:14,
+              display:"flex",alignItems:"center",gap:14,
+            }}>
+              <div style={{
+                width:42,height:42,borderRadius:"50%",flexShrink:0,
+                background:`conic-gradient(var(--gold-light) ${pct*3.6}deg, rgba(255,255,255,0.07) 0deg)`,
+                display:"flex",alignItems:"center",justifyContent:"center",
+              }}>
+                <div style={{
+                  width:32,height:32,borderRadius:"50%",
+                  background:"#0a0805",
+                  display:"flex",alignItems:"center",justifyContent:"center",
+                }}>
+                  <span style={{
+                    fontSize:10.5,fontWeight:700,color:"var(--gold-light)",
+                    fontFamily:"'IBM Plex Mono',monospace",
+                  }}>{pct}%</span>
+                </div>
+              </div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:13,fontWeight:600,color:"var(--text)",marginBottom:3}}>
+                  {done} of {items.length} completed
+                </div>
+                <div style={{height:3,borderRadius:10,background:"rgba(255,255,255,0.07)",overflow:"hidden"}}>
+                  <div style={{
+                    height:"100%",borderRadius:10,
+                    background:"linear-gradient(90deg,#c49012,#f5c842)",
+                    width:`${pct}%`,transition:"width 0.5s ease",
+                  }}/>
+                </div>
+              </div>
+              {overdue > 0 && (
+                <div style={{
+                  padding:"4px 10px",borderRadius:20,
+                  background:"rgba(248,113,113,0.12)",
+                  border:"1px solid rgba(248,113,113,0.25)",
+                  color:"var(--red)",fontSize:11,fontWeight:700,
+                }}>⚠ {overdue}</div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* ── Stats row ── */}
+        <div style={{display:"flex",gap:7,padding:"14px 22px 0",overflowX:"auto"}}>
+          {[
+            {label:"Total",   value:items.length,                                     color:"var(--gold-light)"},
+            {label:"Active",  value:items.filter(i=>!i.completed).length,             color:"var(--blue)"},
+            {label:"Projects",value:items.filter(i=>i.type==="project").length,       color:"var(--purple)"},
+            {label:"Done",    value:done,                                              color:"var(--green)"},
+          ].map(s=>(
+            <div key={s.label} style={{
+              flex:"1 0 64px",
+              background:"rgba(255,255,255,0.03)",
+              border:"1px solid var(--border)",
+              borderRadius:13,padding:"10px 8px",textAlign:"center",
+            }}>
+              <div style={{
+                fontSize:22,fontWeight:700,color:s.color,
+                fontFamily:"'Playfair Display',serif",lineHeight:1,
+              }}>{s.value}</div>
+              <div style={{
+                fontSize:9,color:"var(--text-muted)",
+                textTransform:"uppercase",letterSpacing:"0.08em",marginTop:3,
+              }}>{s.label}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* ── Search + Sort ── */}
+        <div style={{padding:"12px 22px 0",display:"flex",gap:7}}>
+          <div style={{flex:1,position:"relative"}}>
+            <span style={{
+              position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",
+              fontSize:13,opacity:0.28,pointerEvents:"none",
+            }}>🔍</span>
+            <input value={search} onChange={e=>setSearch(e.target.value)}
+              placeholder="Search tasks, tags…"
+              style={{
+                width:"100%",background:"rgba(255,255,255,0.035)",
+                border:"1px solid var(--border)",borderRadius:11,
+                padding:"9px 12px 9px 33px",color:"var(--text)",
+                fontSize:13,fontFamily:"inherit",outline:"none",
+                transition:"border-color 0.2s",
+              }}
+              onFocus={e=>e.target.style.borderColor="rgba(212,160,23,0.35)"}
+              onBlur={e=>e.target.style.borderColor="var(--border)"}/>
+          </div>
+          <div style={{position:"relative"}}>
+            <button onClick={()=>setShowSort(s=>!s)} style={{
+              padding:"9px 12px",borderRadius:11,
+              border:"1px solid var(--border)",
+              background:showSort?"rgba(212,160,23,0.1)":"rgba(255,255,255,0.035)",
+              color:showSort?"var(--gold-light)":"var(--text-dim)",
+              cursor:"pointer",fontSize:12,fontWeight:600,
+              fontFamily:"inherit",whiteSpace:"nowrap",transition:"all 0.15s",
+            }}>⇅ {SORTS.find(s=>s.key===sortBy)?.label.split(" ")[0]}</button>
+            {showSort && (
+              <div style={{
+                position:"absolute",right:0,top:"calc(100% + 6px)",
+                background:"linear-gradient(160deg,#130f08,#1c1710)",
+                border:"1px solid var(--gold-border)",borderRadius:14,
+                padding:5,zIndex:50,minWidth:155,
+                boxShadow:"0 12px 40px rgba(0,0,0,0.6)",
+                animation:"slideDown 0.15s ease",
+              }}>
+                {SORTS.map(opt=>(
+                  <button key={opt.key} onClick={()=>{setSortBy(opt.key);setShowSort(false);}} style={{
+                    display:"block",width:"100%",padding:"9px 13px",borderRadius:9,
+                    background:sortBy===opt.key?"rgba(212,160,23,0.1)":"transparent",
+                    color:sortBy===opt.key?"var(--gold-light)":"var(--text-dim)",
+                    border:"none",cursor:"pointer",fontSize:12.5,
+                    fontWeight:sortBy===opt.key?700:400,textAlign:"left",fontFamily:"inherit",
+                    transition:"background 0.1s",
+                  }}
+                  onMouseEnter={e=>{if(sortBy!==opt.key)e.currentTarget.style.background="rgba(255,255,255,0.05)";}}
+                  onMouseLeave={e=>{if(sortBy!==opt.key)e.currentTarget.style.background="transparent";}}>
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── Filter tabs ── */}
+        <div style={{display:"flex",gap:5,padding:"10px 22px 12px",overflowX:"auto"}}>
+          {FILTERS.map(f=>(
+            <button key={f.key} onClick={()=>setFilter(f.key)} style={{
+              padding:"5px 12px",borderRadius:20,fontSize:11.5,fontWeight:600,
+              border:filter===f.key?"1px solid rgba(212,160,23,0.45)":"1px solid rgba(255,255,255,0.07)",
+              background:filter===f.key?"rgba(212,160,23,0.11)":"transparent",
+              color:filter===f.key?"var(--gold-light)":"var(--text-muted)",
+              cursor:"pointer",whiteSpace:"nowrap",
+              transition:"all 0.15s",fontFamily:"inherit",
+            }}>{f.label}</button>
+          ))}
+        </div>
+
+        {/* ── Add form ── */}
+        {showAdd && <AddForm onAdd={addItem} onCancel={()=>setShowAdd(false)}/>}
+
+        {/* ── Items ── */}
+        <div style={{
+          padding:"0 22px",
+          paddingBottom:"max(110px,calc(env(safe-area-inset-bottom,0px) + 95px))",
+        }}>
+          {filtered.length === 0 ? (
+            <div style={{textAlign:"center",padding:"70px 0",color:"var(--text-muted)"}}>
+              <div style={{fontSize:42,marginBottom:12,opacity:0.6}}>
+                {filter==="done"?"🏆":filter==="overdue"?"✅":search?"🔍":"◇"}
+              </div>
+              <div style={{fontSize:15,fontWeight:600,color:"var(--text-dim)",marginBottom:6}}>
+                {filter==="done"    ?"No completed items yet"     :
+                 filter==="overdue" ?"All caught up — no overdue" :
+                 search             ?"No results found"           :"Nothing here yet"}
+              </div>
+              {filter==="all" && !search && (
+                <div style={{fontSize:12.5,opacity:0.5}}>Tap + to add your first item</div>
+              )}
+            </div>
+          ) : (
+            filtered.map(item=>(
+              <ItemCard key={item.id} item={item}
+                onToggle={toggleItem} onDelete={deleteItem}
+                onShowGift={setGiftItem} onEdit={setEditItem}
+                onToggleSubtask={toggleSubtask}
+                onAddSubtask={addSubtask}
+                onDeleteSubtask={deleteSubtask}
+                onAutoBreakdown={smartBreakdown}
+                aiLoading={aiLoading}
+              />
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* ── FAB ── */}
+      {!showAdd && (
+        <button onClick={()=>setShowAdd(true)} style={{
+          position:"fixed",
+          bottom:"max(28px,env(safe-area-inset-bottom,28px))",
+          left:"50%",transform:"translateX(-50%)",
+          background:"linear-gradient(135deg,#bf8c10,#f5c842)",
+          border:"none",borderRadius:50,
+          padding:"13px 26px",
+          color:"#1a0f00",fontWeight:700,fontSize:14.5,cursor:"pointer",
+          boxShadow:"0 6px 28px rgba(212,160,23,0.45)",
+          display:"flex",alignItems:"center",gap:8,
+          fontFamily:"inherit",zIndex:10,
+          letterSpacing:"0.01em",transition:"transform 0.15s, box-shadow 0.15s",
+        }}
+        onMouseEnter={e=>{e.currentTarget.style.transform="translateX(-50%) translateY(-2px)";e.currentTarget.style.boxShadow="0 10px 36px rgba(212,160,23,0.55)";}}
+        onMouseLeave={e=>{e.currentTarget.style.transform="translateX(-50%)";e.currentTarget.style.boxShadow="0 6px 28px rgba(212,160,23,0.45)";}}>
+          <span style={{fontSize:18,lineHeight:1,fontWeight:300}}>+</span>
+          New Item
+        </button>
+      )}
+
+      {/* ── Modals ── */}
+      {giftItem    && <GiftModal    item={giftItem} onClose={()=>setGiftItem(null)}/>}
+      {editItem    && <EditModal    item={editItem} onSave={u=>saveEdit(editItem.id,u)} onClose={()=>setEditItem(null)}/>}
+      {showSettings&& <SettingsModal onClose={()=>setShowSettings(false)}/>}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(TaskVault));
+</script>
+
+<script>
+// PWA manifest
+(function(){
+  const icon = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIj48cmVjdCB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiIgcng9IjExMiIgZmlsbD0iIzBhMDgwNSIvPjx0ZXh0IHg9IjI1NiIgeT0iMzMwIiBmb250LXNpemU9IjI4MCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2Q0YTAxNyI+4pWmPC90ZXh0Pjwvc3ZnPg==";
+  const m = {
+    name:"TaskVault", short_name:"TaskVault",
+    description:"Projects, tasks & your rewards",
+    start_url:".", display:"standalone",
+    orientation:"portrait-primary",
+    background_color:"#0a0805", theme_color:"#d4a017",
+    icons:[
+      {src:icon,sizes:"192x192",type:"image/svg+xml"},
+      {src:icon,sizes:"512x512",type:"image/svg+xml",purpose:"any maskable"}
+    ],
+  };
+  try {
+    const blob = new Blob([JSON.stringify(m)],{type:"application/manifest+json"});
+    const link = document.createElement("link");
+    link.rel="manifest"; link.href=URL.createObjectURL(blob);
+    document.head.appendChild(link);
+  } catch(e){}
+})();
+</script>
+</body>
+</html>
